@@ -1,0 +1,8 @@
+# directory cache
+.DS_Store
+Thumbs.db
+
+# temporary files
+.*~
+.*.swp
+.*.swo
