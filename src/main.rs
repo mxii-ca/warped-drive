@@ -1,8 +1,8 @@
 use std::env;
 use std::process;
 
-mod device;
-use device::Block;
+use tardis::device::BlockDevice;
+use tardis::fs::parse;
 
 
 fn print_usage(program: &str, err: bool) {
@@ -49,11 +49,12 @@ fn main() {
     }
 
     let path = &args[1];
-    let mut device = device::BlockDevice::open(path).unwrap_or_else(|err| {
+    let result = BlockDevice::open(path);
+    if let Err(err) = result {
         eprintln!("{}: error: failed to open {}: {}", prog, path, err);
         process::exit(2);
-    });
+    }
+    let device = result.unwrap();
 
-    let block_size = device.get_block_size().unwrap();
-    println!("Sector size: {}", block_size);
+    parse(device);
 }

@@ -5,19 +5,7 @@ use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::mem;
 use std::ptr;
 
-
-fn iadd(lvalue: u64, rvalue: i64) -> io::Result<u64> {
-    let result = if rvalue > 0 {
-        lvalue.checked_add(rvalue as u64)
-    } else {
-        lvalue.checked_sub((-rvalue) as u64)
-    };
-    if let Some(value) = result {
-        Ok(value)
-    } else {
-        Err(io::Error::from(io::ErrorKind::InvalidInput))
-    }
-}
+use super::utils::iadd;
 
 
 /// A trait for objects where all operations are in multiples of a fixed size.
@@ -75,7 +63,7 @@ impl Block for fs::File {
         };
         if ! winerror::SUCCEEDED(ret) {
             let err = std::io::Error::from_raw_os_error(unsafe{ GetLastError() } as i32);
-            eprintln!("IOCTL_STORAGE_QUERY_PROPERTY Failed: {}", err);
+            eprintln!("IOCTL_STORAGE_QUERY_PROPERTY Failed: {}\n", err);
 
             // IOCTL_STORAGE_QUERY_PROPERTY doesn't work for external drives
             // fallback to the logical sector size
@@ -107,14 +95,14 @@ impl Block for fs::File {
             };
             if ! winerror::SUCCEEDED(ret) {
                 let err = std::io::Error::from_raw_os_error(unsafe{ GetLastError() } as i32);
-                eprintln!("IOCTL_DISK_GET_DRIVE_GEOMETRY Failed: {}", err);
+                eprintln!("IOCTL_DISK_GET_DRIVE_GEOMETRY Failed: {}\n", err);
                 Err(err)
             } else {
-                eprintln!("{:?}", &geometry);
+                eprintln!("{:#?}\n", &geometry);
                 Ok(geometry.BytesPerSector as usize)
             }
         } else {
-            eprintln!("{:?}", &alignment);
+            eprintln!("{:#?}\n", &alignment);
             Ok(alignment.BytesPerPhysicalSector as usize)
         }
     }
@@ -132,7 +120,7 @@ impl Block for fs::File {
 
         let result = get_block_size(fd, &mut sector_size);
         if let Err(err) = result {
-            eprintln!("IOCTL BLKBSZGET Failed: {}", err);
+            eprintln!("IOCTL BLKBSZGET Failed: {}\n", err);
         }
         result
     }
@@ -183,7 +171,7 @@ impl BlockDevice<fs::File> {
 
     /// Open a block device or file
     pub fn open(path: &str) -> io::Result<BlockDevice<fs::File>> {
-        eprintln!("Opening: {}", path);
+        eprintln!("Opening: {}\n", path);
 
         let result = fs::File::open(path);
         if let Err(err) = result { return Err(err); }
