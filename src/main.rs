@@ -2,6 +2,7 @@ use std::env;
 use std::process;
 
 mod device;
+use device::Block;
 
 
 fn print_usage(program: &str, err: bool) {
@@ -53,5 +54,6 @@ fn main() {
         process::exit(2);
     });
 
-    println!("Sector size: {}", device.get_sector_size());
+    let block_size = device.get_block_size().unwrap();
+    println!("Sector size: {}", block_size);
 }
