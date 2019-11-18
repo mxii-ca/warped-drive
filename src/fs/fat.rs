@@ -14,8 +14,8 @@
 #[repr(C, packed)]
 pub struct BIOS_PARAMETER_BLOCK {
     // --- DOS 2.0 ---
-    BytesPerSector: u16,
-    SectorsPerCluster: u8,
+    pub BytesPerSector: u16,
+    pub SectorsPerCluster: u8,
     ReservedSectors: u16,   // 0 for NTFS
     NumberOfFATs: u8,       // 0 for NTFS
     RootDirectories: u16,   // 0 for NTFS, FAT32
@@ -40,9 +40,9 @@ pub struct BIOS_PARAMETER_BLOCK {
 const CHKDSK_FLAG_VOLUME_DIRTY: u8 = 0x01;
 const CHKDSK_FLAG_SURFACE_SCAN: u8 = 0x02;
 
+#[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
-#[allow(non_snake_case)]
 struct EXTENDED_BIOS_PARAMETER_BLOCK {
     // BIOS_PARAMETER_BLOCK
     // --- DOS 4.0 ---
@@ -59,9 +59,9 @@ struct EXTENDED_BIOS_PARAMETER_BLOCK {
 const MIRROR_MASK_ACTIVE_FATS: u16 = 0x000F;
 const MIRROR_FLAG_ALL_FATS: u16 = 0x0080;
 
+#[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
-#[allow(non_snake_case)]
 struct FAT32_EXTENDED_BIOS_PARAMETER_BLOCK {
     // BIOS_PARAMETER_BLOCK
     // --- DOS 7.1 ---

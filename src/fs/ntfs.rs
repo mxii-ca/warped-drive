@@ -4,9 +4,9 @@ use std::mem;
 use super::fat::BIOS_PARAMETER_BLOCK;
 use super::super::device::{Block, BlockDevice};
 
+#[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
-#[allow(non_snake_case)]
 struct NTFS_EXTENDED_BIOS_PARAMETER_BLOCK {
     // BIOS_PARAMETER_BLOCK
     SectorsPerFAT32: u32,       // 0 for NTFS
@@ -39,4 +39,26 @@ pub fn parse_ntfs<R>(mut device: BlockDevice<R>, header: &[u8]) where R: Block +
 
     eprintln!("{:#?}\n", boot_sector.BiosParameterBlock);
     eprintln!("{:#?}\n", boot_sector.ExtendedBiosParameterBlock);
+
+    let cluster_size = boot_sector.BiosParameterBlock.BytesPerSector as u64 *
+                       boot_sector.BiosParameterBlock.SectorsPerCluster as u64;
+    let mft_offset = boot_sector.ExtendedBiosParameterBlock.MFTLocation * cluster_size;
+    let backup_offset = boot_sector.ExtendedBiosParameterBlock.BackupMFTLocation * cluster_size;
+    let mft_record_size = if boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord > 0 {
+        boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord as u64 * cluster_size
+    } else {
+        (2 as u64).pow((-boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord) as u32)
+    };
+    let index_buffer_size = if boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer > 0 {
+        boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer as u64 * cluster_size
+    } else {
+        (2 as u64).pow((-boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer) as u32)
+    };
+
+    eprintln!("Cluster Size: {}", cluster_size);
+    eprintln!("Primary MFT - Offset: {}", mft_offset);
+    eprintln!("Backup  MFT - Offset: {}", backup_offset);
+    eprintln!("MFT Record Size: {}", mft_record_size);
+    eprintln!("Index Buffer Size: {}", index_buffer_size);
+    eprintln!("");
 }

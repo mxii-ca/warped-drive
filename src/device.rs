@@ -29,8 +29,8 @@ impl Block for fs::File {
         use winapi::um::winnt::HANDLE;
 
         winapi::STRUCT! {
-            #[derive(Debug)]
             #[allow(non_snake_case)]
+            #[derive(Debug)]
             struct STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR {
                 Version: ULONG,
                 Size: ULONG,
@@ -69,8 +69,8 @@ impl Block for fs::File {
             // fallback to the logical sector size
 
             winapi::STRUCT! {
-                #[derive(Debug)]
                 #[allow(non_snake_case)]
+                #[derive(Debug)]
                 struct DISK_GEOMETRY {
                     Cylinders: u64,  // LARGE_INTEGER
                     MediaType: winioctl::MEDIA_TYPE,
