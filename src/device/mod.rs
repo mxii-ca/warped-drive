@@ -3,8 +3,9 @@ use std::fs;
 use std::io;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
-#[cfg_attr(unix, path = "unix.rs")]
-#[cfg_attr(windows, path = "windows.rs")]
+#[cfg_attr(unix, path = "unix_um.rs")]
+#[cfg_attr(all(windows, target_mode = "kernel"), path = "windows_km.rs")]
+#[cfg_attr(all(windows, not(target_mode = "kernel")), path = "windows_um.rs")]
 mod os;
 
 use super::utils::iadd;

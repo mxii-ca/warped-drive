@@ -13,8 +13,19 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(all(windows, target_mode="kernel"))'.dependencies]
+winapi = { version = "0.3", features = ["ntstatus"] }
+
+[target.'cfg(all(windows, not(target_mode="kernel")))'.dependencies]
 winapi = { version = "0.3", features = ["errhandlingapi", "ioapiset", "winerror", "winioctl"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.9" }
+
+
+[target.'cfg(all(windows, target_mode="kernel"))'.lib]
+crate-type = ["dylib"]
+
+
+[[target.'cfg(not(target_mode="kernel"))'.bin]]
+path = "src/main.rs"

@@ -1,0 +1,5 @@
+[target."i686-kernel-windows-msvc"]
+rustflags = ["--cfg", "target_mode=kernel"]
+
+[target."x86_64-kernel-windows-msvc"]
+rustflags = ["--cfg", "target_mode=kernel"]
