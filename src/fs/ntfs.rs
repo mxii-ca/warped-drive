@@ -1,5 +1,4 @@
 use std::io::Read;
-use std::mem;
 
 use super::fat::BIOS_PARAMETER_BLOCK;
 use super::super::device::{Block, BlockDevice};
@@ -35,10 +34,10 @@ struct NTFS_BOOT_SECTOR {
 
 
 pub fn parse_ntfs<R>(mut device: BlockDevice<R>, header: &[u8]) where R: Block + Read {
-    let boot_sector: &NTFS_BOOT_SECTOR = unsafe{ mem::transmute(header.as_ptr()) };
+    let boot_sector: &NTFS_BOOT_SECTOR = unsafe{ & *(header.as_ptr() as *const NTFS_BOOT_SECTOR) };
 
-    eprintln!("{:#?}\n", boot_sector.BiosParameterBlock);
-    eprintln!("{:#?}\n", boot_sector.ExtendedBiosParameterBlock);
+    debug!("{:#?}", boot_sector.BiosParameterBlock);
+    debug!("{:#?}", boot_sector.ExtendedBiosParameterBlock);
 
     let cluster_size = boot_sector.BiosParameterBlock.BytesPerSector as u64 *
                        boot_sector.BiosParameterBlock.SectorsPerCluster as u64;
@@ -55,10 +54,8 @@ pub fn parse_ntfs<R>(mut device: BlockDevice<R>, header: &[u8]) where R: Block +
         (2 as u64).pow((-boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer) as u32)
     };
 
-    eprintln!("Cluster Size: {}", cluster_size);
-    eprintln!("Primary MFT - Offset: {}", mft_offset);
-    eprintln!("Backup  MFT - Offset: {}", backup_offset);
-    eprintln!("MFT Record Size: {}", mft_record_size);
-    eprintln!("Index Buffer Size: {}", index_buffer_size);
-    eprintln!("");
+    debug!(
+        "Cluster Size: {}\nPrimary MFT - Offset: {}\nBackup  MFT - Offset: {}\nMFT Record Size: {}\nIndex Buffer Size: {}",
+        cluster_size, mft_offset, backup_offset, mft_record_size, index_buffer_size
+    );
 }
