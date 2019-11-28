@@ -15,17 +15,7 @@ pub fn iadd(lvalue: u64, rvalue: i64) -> io::Result<u64> {
 }
 
 
-#[macro_export]
-macro_rules! debug {
-    ($($arg:tt)*) => {
-        #[cfg(debug_assertions)]
-        eprintln!("{}\n", format_args!($($arg)*));
-    }
-}
-
-
-#[cfg(debug_assertions)]
-pub fn debug_xxd(buffer: &[u8], address: u64) {
+pub fn xxd(buffer: &[u8], address: u64) {
     let size = buffer.len();
     for i in (0..size).step_by(16) {
         eprint!("{:08x}:", address + i as u64);
@@ -66,5 +56,20 @@ pub fn debug_xxd(buffer: &[u8], address: u64) {
     eprintln!("");
 }
 
-#[cfg(not(debug_assertions))]
-pub fn debug_xxd(_buffer: &[u8], _address: u64) { }
+
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        eprintln!("{}\n", format_args!($($arg)*));
+    }
+}
+
+
+#[macro_export]
+macro_rules! debug_xxd {
+    ($buffer:expr, $address:expr) => {
+        #[cfg(debug_assertions)]
+        $crate::utils::xxd($buffer, $address);
+    }
+}

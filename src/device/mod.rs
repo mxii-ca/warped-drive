@@ -195,7 +195,7 @@ macro_rules! read_struct {
                         Err(err)
                     } else {
 
-                        debug_xxd(&raw, offset);
+                        debug_xxd!(&raw, offset);
 
                         let object: $type = unsafe{ *(raw.as_ptr() as *const $type) };
                         debug!("{:#?}", object);
