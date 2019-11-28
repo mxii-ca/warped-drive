@@ -9,6 +9,11 @@
 // or for arrays larger than 32
 
 
+const MEDIA_DESCRIPTOR_SIDES_MASK: u8 = 0x01;       // 0 - single, 1 - double
+const MEDIA_DESCRIPTOR_TRACK_SIZE_MASK: u8 = 0x02;  // 0 - 9 sectors, 1 - 8 sectors
+const MEDIA_DESCRIPTOR_DENSITY_MASK: u8 = 0x04;     // 0 - 80 tracks, 1 - 40 tracks
+const MEDIA_DESCRIPTOR_TYPE_MASK: u8 = 0x80;        // 0 - fixed, 1 - removable
+
 #[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]

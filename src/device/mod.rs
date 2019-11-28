@@ -167,3 +167,43 @@ impl<R> Seek for BlockDevice<R> where R: Read + Seek {
         Ok(target)
     }
 }
+
+
+#[macro_export]
+macro_rules! read_struct {
+    ($type:ty, $device:ident, $offset:expr, $max_size:expr) => {
+        {
+            let offset = $offset as u64;
+            let max_size = $max_size as u64;
+            if max_size < core::mem::size_of::<$type>() as u64 {
+                eprintln!(
+                    "WARNING: not enough space to read: {} vs {}",
+                    max_size, core::mem::size_of::<$type>()
+                );
+                Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
+            } else {
+                let mut raw: [u8; core::mem::size_of::<$type>()] = [0; core::mem::size_of::<$type>()];
+
+                let result = $device.seek(std::io::SeekFrom::Start(offset));
+                if let Err(err) = result {
+                    eprintln!("ERROR: Seek Failed: {}", err);
+                    Err(err)
+                } else {
+                    let result = $device.read_exact(&mut raw);
+                    if let Err(err) = result {
+                        eprintln!("ERROR: Read Failed: {}", err);
+                        Err(err)
+                    } else {
+
+                        debug_xxd(&raw, offset);
+
+                        let object: $type = unsafe{ *(raw.as_ptr() as *const $type) };
+                        debug!("{:#?}", object);
+
+                        Ok(object)
+                    }
+                }
+            }
+        }
+    };
+}
