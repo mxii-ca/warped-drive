@@ -1,4 +1,4 @@
-use std::cmp;
+use core::cmp;
 use std::fs;
 use std::io;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -85,17 +85,21 @@ impl<R> Read for BlockDevice<R> where R: Read {
 
         // consume the cache first
         if cached > 0 {
-            self.inner.read(&mut buf[..cmp::min(size, cached)])
+            let real = cmp::min(size, cached);
+            debug!("Cache Size: {}\nRequest: {}\nActual: {}", cached, size, real);
+            self.inner.read(&mut buf[..real])
 
         // `self.inner` (`BufReader`) will always read exactly `self.block_size`
         // bytes except when asked to read a larger size in which case the
         // size must be truncated to ensure an aligned read
         } else if size > self.block_size {
             let aligned = size - (size % self.block_size);
+            debug!("Block Size: {}\nRequested: {}\nAligned: {}", self.block_size, size, aligned);
             self.inner.read(&mut buf[..aligned])
 
         // otherwise, can let `self.inner` handle the read
         } else {
+            debug!("Block Size: {}\nRequested: {}", self.block_size, size);
             self.inner.read(buf)
         }
     }
@@ -128,9 +132,15 @@ impl<R> Seek for BlockDevice<R> where R: Read + Seek {
         if let Err(err) = result { return Err(err); }
         let target = result.unwrap();
 
+        debug!(
+            "Cache Size: {}\nActual Pos: {}\nVirtual Pos: {}\nTarget Pos: {}",
+            remain, maximum, current, target
+        );
+
         // use `consume` to *seek* within the confines of the cache
         // but only forwards, (it takes a `usize`)
-        if target >= current && current <= maximum {
+        if target >= current && target <= maximum {
+            debug!("Virtual Seek: {}", target - current);
             self.inner.consume((target - current) as usize);
         } else {
 
@@ -138,6 +148,8 @@ impl<R> Seek for BlockDevice<R> where R: Read + Seek {
             // so only seek to aligned values to ensure all reads are aligned
             let offset = target % self.block_size as u64;
             let aligned = target - offset;
+
+            debug!("Actual Seek: {}", aligned);
 
             let result = self.inner.seek(SeekFrom::Start(aligned));
             if let Err(err) = result { return Err(err); }
@@ -148,6 +160,7 @@ impl<R> Seek for BlockDevice<R> where R: Read + Seek {
                 let result = self.inner.fill_buf();
                 if let Err(err) = result { return Err(err); }
 
+                debug!("Virtual Seek: {}", offset);
                 self.inner.consume(offset as usize);
             }
         }
