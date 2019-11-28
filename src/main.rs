@@ -56,5 +56,7 @@ fn main() {
     }
     let device = result.unwrap();
 
-    parse(device);
+    if let Err(_) = parse(device) {
+        process::exit(3);
+    }
 }

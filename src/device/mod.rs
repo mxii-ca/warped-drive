@@ -21,7 +21,7 @@ pub trait Block {
 /// A Block Reader.
 #[derive(Debug)]
 pub struct BlockDevice<R> {
-    inner: BufReader<R>,
+    inner: BufReader<R>,  // FIXME: switch to buffering directly so can unconsume
     block_size: usize,
 }
 
@@ -49,12 +49,9 @@ impl<R> BlockDevice<R> where R: Block + Read {
 
     /// Creates a new `BlockDevice`.
     pub fn new(inner: R) -> io::Result<BlockDevice<R>> {
-
-        let result = inner.get_block_size();
-        if let Err(err) = result { return Err(err); }
-        let block_size = result.unwrap();
-
-        Ok(BlockDevice::with_block_size(inner, block_size))
+        inner.get_block_size().and_then(|block_size| {
+            Ok(BlockDevice::with_block_size(inner, block_size))
+        })
     }
 }
 
@@ -63,12 +60,9 @@ impl BlockDevice<fs::File> {
     /// Open a block device or file
     pub fn open(path: &str) -> io::Result<BlockDevice<fs::File>> {
         debug!("Opening: {}", path);
-
-        let result = fs::File::open(path);
-        if let Err(err) = result { return Err(err); }
-        let file = result.unwrap();
-
-        BlockDevice::new(file)
+        fs::File::open(path).and_then(|file| {
+            BlockDevice::new(file)
+        })
     }
 }
 
@@ -184,16 +178,14 @@ macro_rules! read_struct {
             } else {
                 let mut raw: [u8; core::mem::size_of::<$type>()] = [0; core::mem::size_of::<$type>()];
 
-                let result = $device.seek(std::io::SeekFrom::Start(offset));
-                if let Err(err) = result {
+                $device.seek(std::io::SeekFrom::Start(offset)).or_else(|err| {
                     eprintln!("ERROR: Seek Failed: {}", err);
                     Err(err)
-                } else {
-                    let result = $device.read_exact(&mut raw);
-                    if let Err(err) = result {
+                }).and_then(|_| {
+                    $device.read_exact(&mut raw).or_else(|err| {
                         eprintln!("ERROR: Read Failed: {}", err);
                         Err(err)
-                    } else {
+                    }).and_then(|_| {
 
                         debug_xxd!(&raw, offset);
 
@@ -201,8 +193,8 @@ macro_rules! read_struct {
                         debug!("{:#?}", object);
 
                         Ok(object)
-                    }
-                }
+                    })
+                })
             }
         }
     };

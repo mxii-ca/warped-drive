@@ -144,7 +144,7 @@ fn parse_file_record<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u64)
     }).or_else(|err| Err(err))
 }
 
-pub fn parse_ntfs<R>(mut device: BlockDevice<R>, header: &[u8]) where R: Block + Read + Seek {
+pub fn parse_ntfs<R>(device: BlockDevice<R>, header: &[u8]) -> io::Result<()> where R: Block + Read + Seek {
     let boot_sector: &NTFS_BOOT_SECTOR = unsafe{ & *(header.as_ptr() as *const NTFS_BOOT_SECTOR) };
 
     debug!("{:#?}", boot_sector.BiosParameterBlock);
@@ -170,5 +170,10 @@ pub fn parse_ntfs<R>(mut device: BlockDevice<R>, header: &[u8]) where R: Block +
         cluster_size, mft_offset, backup_offset, mft_record_size, index_buffer_size
     );
 
-    parse_file_record(&mut device, mft_offset, mft_record_size);
+    let mut wrapped = BlockDevice::with_block_size(device, cluster_size as usize);
+
+    parse_file_record(&mut wrapped, mft_offset, mft_record_size).or_else(|_| {
+        eprintln!("WARNING: Primart MFT is bad. Parsing backup...");
+        parse_file_record(&mut wrapped, backup_offset, mft_record_size)
+    })
 }

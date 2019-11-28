@@ -18,10 +18,9 @@ impl Block for File {
         let fd = self.into_raw_fd();
         let mut block_size: usize = 0;
 
-        let result = ioctl_blkbszget(fd, &mut block_size);
-        if let Err(err) = result {
+        ioctl_blkbszget(fd, &mut block_size).or_else(|err| {
             eprintln!("IOCTL BLKBSZGET Failed: {}\n", err);
-        }
-        result
+            Err(err)
+        })
     }
 }
