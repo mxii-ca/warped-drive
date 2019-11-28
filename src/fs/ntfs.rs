@@ -113,35 +113,29 @@ struct ATTRIBUTE_RECORD_HEADER {
 
 
 fn parse_file_attribute<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u64) -> io::Result<u64> where R: Block + Read + Seek {
-    read_struct!(ATTRIBUTE_TYPE_CODE, device, offset, max_size).and_then(|type_code| {
-        if type_code == ATTRIBUTE_TYPE_CODE::END {
-            Ok(0)
-        } else {
-            read_struct!(ATTRIBUTE_RECORD_HEADER, device, offset, max_size).and_then(|attr| {
-                Ok(attr.RecordLength as u64)
-            })
-        }
-    }).or_else(|err| Err(err))
+    let type_code = read_struct!(ATTRIBUTE_TYPE_CODE, device, offset, max_size)?;
+    if type_code == ATTRIBUTE_TYPE_CODE::END {
+        return Ok(0);
+    }
+
+    let attr = read_struct!(ATTRIBUTE_RECORD_HEADER, device, offset, max_size)?;
+
+    Ok(attr.RecordLength as u64)
 }
 
 fn parse_file_record<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u64) -> io::Result<()> where R: Block + Read + Seek {
-    read_struct!(FILE_RECORD_SEGMENT_HEADER, device, offset, max_size).and_then(|record| {
+    let record = read_struct!(FILE_RECORD_SEGMENT_HEADER, device, offset, max_size)?;
 
-        let (max, mut pos) = (record.RealSize as u64, record.FirstAttributeOffset as u64);
-        while pos < max {
-            let result = parse_file_attribute(device, offset + pos, max - pos);
-            if let Err(err) = result {
-                return Err(err);
-            }
-            let size = result.unwrap();
-            if size == 0 {
-                break;
-            }
-            pos += size;
+    let (max, mut pos) = (record.RealSize as u64, record.FirstAttributeOffset as u64);
+    while pos < max {
+        let size = parse_file_attribute(device, offset + pos, max - pos)?;
+        if size == 0 {
+            break;
         }
+        pos += size;
+    }
 
-        Ok(())
-    }).or_else(|err| Err(err))
+    Ok(())
 }
 
 pub fn parse_ntfs<R>(device: BlockDevice<R>, header: &[u8]) -> io::Result<()> where R: Block + Read + Seek {
