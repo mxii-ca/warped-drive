@@ -202,3 +202,37 @@ macro_rules! read_struct {
         }
     };
 }
+
+
+#[macro_export]
+macro_rules! read_utf16 {
+    ($device:ident, $offset:expr, $length:expr, $max_size:expr) => {
+        {
+            let offset = $offset as u64;
+            let length = $length as usize;
+            let max_size = $max_size as usize;
+            if max_size < length * 2 {
+                eprintln!(
+                    "ERROR: not enough space to read: {} vs {}",
+                    max_size, length * 2
+                );
+                Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
+            } else {
+                let mut raw: Vec<u16> = Vec::with_capacity(length);
+                raw.resize(length, 0);
+                let mut raw = raw.into_boxed_slice();
+                {
+                    let s: &mut [u8] = unsafe {
+                        let ptr = &mut raw as *mut _ as *mut u8;
+                        std::slice::from_raw_parts_mut(ptr, length * 2)
+                    };
+                    $device.seek(std::io::SeekFrom::Start(offset))?;
+                    $device.read(s)?;
+                }
+                String::from_utf16(&raw).or(
+                    Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
+                )
+            }
+        }
+    };
+}

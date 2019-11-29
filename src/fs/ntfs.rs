@@ -120,6 +120,9 @@ fn parse_file_attribute<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u
 
     let attr = read_struct!(ATTRIBUTE_RECORD_HEADER, device, offset, max_size)?;
 
+    let name = read_utf16!(device, offset + attr.NameOffset as u64, attr.NameLength, max_size - attr.NameOffset as u64)?;
+    debug!("Attribute Name: {}", name);
+
     Ok(attr.RecordLength as u64)
 }
 
