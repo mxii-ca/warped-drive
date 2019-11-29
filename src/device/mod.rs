@@ -94,10 +94,8 @@ impl<R> BufRead for BlockDevice<R> where R: Read {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         if self.pos >= self.cap {
             debug_assert!(self.pos == self.cap);
-            debug!("[re]Populating Cache");
             self.cap = self.inner.read(&mut self.buf)?;
             self.pos = 0;
-            debug!("Raw Read: Read {}", self.cap);
         }
         Ok(&self.buf[self.pos..self.cap])
     }
@@ -114,19 +112,14 @@ impl<R> Read for BlockDevice<R> where R: Read {
         if self.pos == self.cap && buf.len() > self.buf.len() {
             let aligned = buf.len() - (buf.len() % self.buf.len());
             self.discard_buffer();
-            debug!("Raw Read: Requested {} -> Aligned {}", buf.len(), aligned);
-            let nread = self.inner.read(&mut buf[..aligned])?;
-            debug!("Raw Read: Read {}", nread);
-            return Ok(nread);
+            return self.inner.read(&mut buf[..aligned])
         }
 
-        debug!("Cached Read: Requested {}", buf.len());
         let nread = {
             let mut rem = self.fill_buf()?;
             rem.read(buf)?
         };
         self.consume(nread);
-        debug!("Cached Read: Read {}", nread);
         Ok(nread)
     }
 }
@@ -147,11 +140,6 @@ impl<R> Seek for BlockDevice<R> where R: Read + Seek {
             }
         }?;
 
-        debug!(
-            "Cache Pos: {}\nActual Pos: {}\nVirtual Pos: {}\nTarget Pos: {}",
-            self.pos, maximum, current, target
-        );
-
         if target == current {
             return Ok(target)
         }
@@ -160,20 +148,16 @@ impl<R> Seek for BlockDevice<R> where R: Read + Seek {
             let offset = target % self.buf.len() as u64;
             let aligned = target - offset;
 
-            debug!("Actual Seek: {}", aligned);
-
             self.discard_buffer();
             self.inner.seek(SeekFrom::Start(aligned))?;
 
             if target > aligned {
                 self.fill_buf()?;
-                debug!("Virtual Seek: {}", target - aligned);
                 self.pos = (target - aligned) as usize;
             }
         }
 
         if target >= minimum && target <= maximum {
-            debug!("Virtual Seek: {}", target as i64 - current as i64);
             self.pos = (target - minimum) as usize;
         }
 
@@ -190,7 +174,7 @@ macro_rules! read_struct {
             let max_size = $max_size as u64;
             if max_size < core::mem::size_of::<$type>() as u64 {
                 eprintln!(
-                    "WARNING: not enough space to read: {} vs {}",
+                    "ERROR: not enough space to read: {} vs {}",
                     max_size, core::mem::size_of::<$type>()
                 );
                 Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
