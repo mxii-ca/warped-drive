@@ -2,7 +2,7 @@ use std::io;
 use std::io::{Read, Seek};
 
 use super::fat::BIOS_PARAMETER_BLOCK;
-use super::super::device::{Block, BlockDevice};
+use super::super::device::{Block, Device, Volume};
 
 #[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug)]
@@ -112,7 +112,8 @@ struct ATTRIBUTE_RECORD_HEADER {
 }
 
 
-fn parse_file_attribute<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u64) -> io::Result<u64> where R: Block + Read + Seek {
+fn parse_file_attribute<R>(device: &mut Device<R>, offset: u64, max_size: u64) -> io::Result<u64>
+where R: Read + Seek {
     let type_code = read_struct!(ATTRIBUTE_TYPE_CODE, device, offset, max_size)?;
     if type_code == ATTRIBUTE_TYPE_CODE::END {
         return Ok(0);
@@ -126,7 +127,8 @@ fn parse_file_attribute<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u
     Ok(attr.RecordLength as u64)
 }
 
-fn parse_file_record<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u64) -> io::Result<()> where R: Block + Read + Seek {
+fn parse_file_record<R>(device: &mut Device<R>, offset: u64, max_size: u64) -> io::Result<()>
+where R: Read + Seek {
     let record = read_struct!(FILE_RECORD_SEGMENT_HEADER, device, offset, max_size)?;
 
     let (max, mut pos) = (record.RealSize as u64, record.FirstAttributeOffset as u64);
@@ -141,36 +143,74 @@ fn parse_file_record<R>(device: &mut BlockDevice<R>, offset: u64, max_size: u64)
     Ok(())
 }
 
-pub fn parse_ntfs<R>(device: BlockDevice<R>, header: &[u8]) -> io::Result<()> where R: Block + Read + Seek {
-    let boot_sector: &NTFS_BOOT_SECTOR = unsafe{ & *(header.as_ptr() as *const NTFS_BOOT_SECTOR) };
 
-    debug!("{:#?}", boot_sector.BiosParameterBlock);
-    debug!("{:#?}", boot_sector.ExtendedBiosParameterBlock);
+pub struct Ntfs<R> {
+    inner: Device<R>,
+    mft_primary: u64,
+    mft_backup: u64,
+    record_size: u64,
+}
 
-    let cluster_size = boot_sector.BiosParameterBlock.BytesPerSector as u64 *
-                       boot_sector.BiosParameterBlock.SectorsPerCluster as u64;
-    let mft_offset = boot_sector.ExtendedBiosParameterBlock.MFTLocation * cluster_size;
-    let backup_offset = boot_sector.ExtendedBiosParameterBlock.BackupMFTLocation * cluster_size;
-    let mft_record_size = if boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord > 0 {
-        boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord as u64 * cluster_size
-    } else {
-        (2 as u64).pow((-boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord) as u32)
-    };
-    let index_buffer_size = if boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer > 0 {
-        boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer as u64 * cluster_size
-    } else {
-        (2 as u64).pow((-boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer) as u32)
-    };
+impl<R> Ntfs<R> {
 
-    debug!(
-        "Cluster Size: {}\nPrimary MFT - Offset: {}\nBackup  MFT - Offset: {}\nMFT Record Size: {}\nIndex Buffer Size: {}",
-        cluster_size, mft_offset, backup_offset, mft_record_size, index_buffer_size
-    );
+    /// Gets a reference to the underlying reader.
+    pub fn get_ref(&self) -> &R { self.inner.get_ref() }
 
-    let mut wrapped = BlockDevice::with_block_size(device, cluster_size as usize);
+    /// Gets a mutable reference to the underlying reader.
+    pub fn get_mut(&mut self) -> &mut R { self.inner.get_mut() }
 
-    parse_file_record(&mut wrapped, mft_offset, mft_record_size).or_else(|_| {
-        eprintln!("WARNING: Primart MFT is bad. Parsing backup...");
-        parse_file_record(&mut wrapped, backup_offset, mft_record_size)
-    })
+    /// Unwraps this `BlockDevice`, returning the underlying reader.
+    pub fn into_inner(self) -> R { self.inner.into_inner() }
+}
+
+impl<R> Volume<R> for Ntfs<R>
+where R: Read + Seek {
+
+    fn is_supported(header: &[u8; 512]) -> bool {
+        &header[3..7] == b"NTFS"
+    }
+
+    fn with_header(inner: R, header: &[u8; 512]) -> io::Result<Self> {
+        let boot_sector: &NTFS_BOOT_SECTOR = unsafe{ & *(header.as_ptr() as *const NTFS_BOOT_SECTOR) };
+
+        debug!("{:#?}", boot_sector.BiosParameterBlock);
+        debug!("{:#?}", boot_sector.ExtendedBiosParameterBlock);
+
+        let cluster_size = boot_sector.BiosParameterBlock.BytesPerSector as u64 *
+                        boot_sector.BiosParameterBlock.SectorsPerCluster as u64;
+        let mft_offset = boot_sector.ExtendedBiosParameterBlock.MFTLocation * cluster_size;
+        let backup_offset = boot_sector.ExtendedBiosParameterBlock.BackupMFTLocation * cluster_size;
+        let mft_record_size = if boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord > 0 {
+            boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord as u64 * cluster_size
+        } else {
+            (2 as u64).pow((-boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord) as u32)
+        };
+        let index_buffer_size = if boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer > 0 {
+            boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer as u64 * cluster_size
+        } else {
+            (2 as u64).pow((-boot_sector.ExtendedBiosParameterBlock.ClustersPerIndexBuffer) as u32)
+        };
+
+        debug!(
+            "Cluster Size: {}\nPrimary MFT - Offset: {}\nBackup  MFT - Offset: {}\nMFT Record Size: {}\nIndex Buffer Size: {}",
+            cluster_size, mft_offset, backup_offset, mft_record_size, index_buffer_size
+        );
+
+        let wrapper = Device::with_block_size(inner, cluster_size as usize);
+        let mut new = Self {
+            inner: wrapper,
+            mft_primary: mft_offset,
+            mft_backup: backup_offset,
+            record_size: mft_record_size
+        };
+        new.refresh()?;
+        Ok(new)
+    }
+
+    fn refresh(&mut self) -> io::Result<()> {
+        parse_file_record(&mut self.inner, self.mft_primary, self.record_size).or_else(|_| {
+            eprintln!("WARNING: Primart MFT is bad. Parsing backup...");
+            parse_file_record(&mut self.inner, self.mft_backup, self.record_size)
+        })
+    }
 }

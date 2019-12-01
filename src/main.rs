@@ -1,7 +1,7 @@
 use std::env;
 use std::process;
 
-use tardis::device::BlockDevice;
+use tardis::device::Device;
 use tardis::fs::parse;
 
 
@@ -49,7 +49,7 @@ fn main() {
     }
 
     let path = &args[1];
-    let result = BlockDevice::open(path);
+    let result = Device::open(path);
     if let Err(err) = result {
         eprintln!("{}: error: failed to open {}: {}", prog, path, err);
         process::exit(2);

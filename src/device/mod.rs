@@ -20,7 +20,7 @@ pub trait Block {
 
 /// A Block Reader.
 #[derive(Debug)]
-pub struct BlockDevice<R> {
+pub struct Device<R> {
     // ideally we would wrap this in a `BufReader` so that it can handle blocking
     // unfortunately, `BufReader.seek` always drops the buffer
     inner: R,
@@ -29,13 +29,13 @@ pub struct BlockDevice<R> {
     cap: usize,
 }
 
-impl<R> BlockDevice<R> {
+impl<R> Device<R> {
 
     /// Creates a new `BlockDevice` with the specified block size.
-    pub fn with_block_size(inner: R, block_size: usize) -> BlockDevice<R> {
+    pub fn with_block_size(inner: R, block_size: usize) -> Self {
         let mut buffer = Vec::with_capacity(block_size);
         buffer.resize(block_size, 0);
-        BlockDevice {
+        Self {
             inner: inner,
             buf: buffer.into_boxed_slice(),
             pos: 0,
@@ -65,32 +65,34 @@ impl<R> BlockDevice<R> {
     }
 }
 
-impl<R> BlockDevice<R> where R: Block {
+impl<R> Device<R>
+where R: Block {
 
     /// Creates a new `BlockDevice`.
-    pub fn new(inner: R) -> io::Result<BlockDevice<R>> {
+    pub fn new(inner: R) -> io::Result<Self> {
         let block_size = inner.get_block_size()?;
-        Ok(BlockDevice::with_block_size(inner, block_size))
+        Ok(Self::with_block_size(inner, block_size))
     }
 }
 
-impl BlockDevice<fs::File> {
+impl Device<fs::File> {
 
     /// Open a block device or file
-    pub fn open(path: &str) -> io::Result<BlockDevice<fs::File>> {
+    pub fn open(path: &str) -> io::Result<Self> {
         debug!("Opening: {}", path);
         let file = fs::File::open(path)?;
-        BlockDevice::new(file)
+        Self::new(file)
     }
 }
 
-impl<R> Block for BlockDevice<R> {
+impl<R> Block for Device<R> {
     fn get_block_size(&self) -> io::Result<usize> {
         Ok(self.buf.len())
     }
 }
 
-impl<R> BufRead for BlockDevice<R> where R: Read {
+impl<R> BufRead for Device<R>
+where R: Read {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         if self.pos >= self.cap {
             debug_assert!(self.pos == self.cap);
@@ -105,7 +107,8 @@ impl<R> BufRead for BlockDevice<R> where R: Read {
     }
 }
 
-impl<R> Read for BlockDevice<R> where R: Read {
+impl<R> Read for Device<R>
+where R: Read {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 
         // bypass the cache for large reads
@@ -124,7 +127,8 @@ impl<R> Read for BlockDevice<R> where R: Read {
     }
 }
 
-impl<R> Seek for BlockDevice<R> where R: Read + Seek {
+impl<R> Seek for Device<R>
+where R: Read + Seek {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let maximum = self.inner.seek(SeekFrom::Current(0))?;
         let minimum = maximum - self.cap as u64;
@@ -163,6 +167,37 @@ impl<R> Seek for BlockDevice<R> where R: Read + Seek {
 
         Ok(target)
     }
+}
+
+
+/// A trait for disk Volumes.
+pub trait Volume<R>
+where R: Read {
+
+    /// Create a new Volume from a reader when the header has already been read.
+    fn with_header(inner: R, header: &[u8; 512]) -> io::Result<Self>
+    where Self: Sized;
+
+    /// Create a new Volume from a reader.
+    fn new(mut inner: R) -> io::Result<Self>
+    where Self: Sized {
+        let mut header: [u8; 512] = [0; 512];
+        inner.read_exact(&mut header).or_else(|err| {
+            eprintln!("ERROR: Read Failed: {}", err);
+            Err(err)
+        }).and_then(|_| {
+
+            debug_xxd!(&header, 0);
+
+            Self::with_header(inner, &header)
+        })
+    }
+
+    /// Is the header a Volume of this type?
+    fn is_supported(header: &[u8; 512]) -> bool;
+
+    /// [re]-Load data from disk.
+    fn refresh(&mut self) -> io::Result<()>;
 }
 
 

@@ -1,15 +1,16 @@
 use std::io;
 use std::io::{Read, Seek};
 
-use super::device::{Block, BlockDevice};
+use super::device::{Block, Device, Volume};
 
 mod fat;
 mod ntfs;
 
-use ntfs::parse_ntfs;
+pub use ntfs::Ntfs;
 
 
-pub fn parse<R>(mut device: BlockDevice<R>) -> io::Result<()> where R: Block + Read + Seek {
+pub fn parse<R>(mut device: Device<R>) -> io::Result<impl Volume<Device<R>>>
+where R: Block + Read + Seek {
     let block_size = device.get_block_size()?;
     debug!("Block size: {}", block_size);
 
@@ -21,11 +22,11 @@ pub fn parse<R>(mut device: BlockDevice<R>) -> io::Result<()> where R: Block + R
 
         debug_xxd!(&header, 0);
 
-        if &header[3..7] == b"NTFS" {
+        if Ntfs::<R>::is_supported(&header) {
             debug!("Filesystem: NTFS");
-            parse_ntfs(device, &mut header)
+            Ntfs::with_header(device, &mut header)
         } else {
-            Ok(())
+            Err(io::Error::from(io::ErrorKind::NotFound))
         }
     })
 }
