@@ -1,9 +1,10 @@
 use core::cmp;
+use core::mem;
 use std::io;
 use std::io::{Read, Seek};
 
 use super::fat::BIOS_PARAMETER_BLOCK;
-use super::super::device::{Block, Device, Volume};
+use super::super::device::{Device, Volume};
 
 #[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug)]
@@ -73,6 +74,7 @@ struct FILE_RECORD_SEGMENT_HEADER {
     NextAttribute: u16,
 }
 
+
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
@@ -109,11 +111,94 @@ struct ATTRIBUTE_RECORD_HEADER {
     NameOffset: u16,
     Flags: u16,
     Instance: u16,
-    // ...
 }
 
+#[allow(non_snake_case)]
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct ATTRIBUTE_RECORD_HEADER_RESIDENT {
+    ValueLength: u32,
+    ValueOffset: u16,
+    Indexed: u8,
+    Padding: u8,
 }
 
+#[allow(non_snake_case)]
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct ATTRIBUTE_RECORD_HEADER_NON_RESIDENT {
+    LowestVcn: u64,
+    HighestVcn: u64,
+    MappingPairOffset: u16,
+    Reserved: [u8; 6],
+    AllocatedLength: u64,   // only valid when LowestVcn == 0
+    FileSize: u64,          // only valid when LowestVcn == 0
+    ValidDataLength: u64,   // only valid when LowestVcn == 0
+    TotalAllocated: u64,
+}
+
+
+const PERMISSION_FLAG_READ_ONLY:     u32 = 0x00000001;
+const PERMISSION_FLAG_HIDDEN:        u32 = 0x00000002;
+const PERMISSION_FLAG_SYSTEM:        u32 = 0x00000004;
+const PERMISSION_FLAG_ARCHIVE:       u32 = 0x00000020;
+const PERMISSION_FLAG_DEVICE:        u32 = 0x00000040;
+const PERMISSION_FLAG_NORMAL:        u32 = 0x00000080;
+const PERMISSION_FLAG_TEMPORARY:     u32 = 0x00000100;
+const PERMISSION_FLAG_SPARSE:        u32 = 0x00000200;
+const PERMISSION_FLAG_REPARSE_POINT: u32 = 0x00000400;
+const PERMISSION_FLAG_COMPRESSED:    u32 = 0x00000800;
+const PERMISSION_FLAG_OFFLINE:       u32 = 0x00001000;
+const PERMISSION_FLAG_NOT_INDEXED:   u32 = 0x00002000;
+const PERMISSION_FLAG_ENCRYPTED:     u32 = 0x00004000;
+const PERMISSION_FLAG_DIRECTORY:     u32 = 0x10000000;
+const PERMISSION_FLAG_INDEX_VIEW:    u32 = 0x20000000;
+
+#[allow(non_snake_case)]
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct STANDARD_INFORMATION {
+	CreationTime: u64,
+	ModifiedTime: u64,
+	ChangeTime: u64,
+	AccessTime: u64,
+	Permissions: u32,
+	MaxVersion: u32,
+	Version: u32,
+    ClassID: u32,
+    // --- NTFS 3.0 ---
+    OwnerId: u32,
+    SecurityId: u32,
+	QuotaCharged: u64,
+	UpdateSequenceNumber: u64,
+}
+
+
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u8)]
+enum FILE_NAME_TYPE {
+    POSIX = 0,
+    WINDOWS = 1,
+    DOS = 2,
+    DOS_WINDOWS = 3,
+}
+
+#[allow(non_snake_case)]
+#[derive(Clone, Copy, Debug)]
+#[repr(C, packed)]
+struct FILE_NAME {
+    ParentDirectory: FILE_REFERENCE,
+	CreationTime: u64,
+	ModifiedTime: u64,
+	ChangeTime: u64,
+	AccessTime: u64,
+	AllocatedSize: u64,
+	RealSize: u64,
+	Permissions: u32,
+	ReparseTag: u32,
+    FileNameLength: u8,
+    Type: FILE_NAME_TYPE,
 }
 
 
@@ -149,7 +234,7 @@ where R: Read + Seek {
         debug!("{:#?}", boot_sector.ExtendedBiosParameterBlock);
 
         let cluster_size = boot_sector.BiosParameterBlock.BytesPerSector as u64 *
-                        boot_sector.BiosParameterBlock.SectorsPerCluster as u64;
+                           boot_sector.BiosParameterBlock.SectorsPerCluster as u64;
         let mft_offset = boot_sector.ExtendedBiosParameterBlock.MFTLocation * cluster_size;
         let backup_offset = boot_sector.ExtendedBiosParameterBlock.BackupMFTLocation * cluster_size;
         let mft_record_size = if boot_sector.ExtendedBiosParameterBlock.ClustersPerMFTRecord > 0 {
@@ -228,11 +313,44 @@ impl FileRecord {
         }
 
         let attr = read_struct!(ATTRIBUTE_RECORD_HEADER, device, offset, max_size)?;
+        let read = mem::size_of::<ATTRIBUTE_RECORD_HEADER>() as u64;
+
+        let result = if attr.FormCode == RESIDENT_FORM {
+            let loc = read_struct!(ATTRIBUTE_RECORD_HEADER_RESIDENT, device, offset + read, max_size - read)?;
+
+            let data_offset = offset + loc.ValueOffset as u64;
+            let data_size = loc.ValueLength;
+
+            match type_code {
+                ATTRIBUTE_TYPE_CODE::STANDARD_INFORMATION => {
+                    let info = read_struct!(STANDARD_INFORMATION, device, data_offset, data_size)?;
+                }
+
+                ATTRIBUTE_TYPE_CODE::FILE_NAME => {
+                    let info = read_struct!(FILE_NAME, device, data_offset, data_size)?;
+
+                    let read = mem::size_of::<FILE_NAME>() as u64;
+                    let name = read_utf16!(device, data_offset + read, info.FileNameLength, max_size - read)?;
+                    debug!("File Name: {}", name);
+                }
+
+                _ => {}
+            }
+
+            Ok(attr.RecordLength as u64)
+        } else if attr.FormCode == NONRESIDENT_FORM {
+            let loc = read_struct!(ATTRIBUTE_RECORD_HEADER_NON_RESIDENT, device, offset + read, max_size - read)?;
+
+            Ok(attr.RecordLength as u64)
+        } else {
+            eprintln!("ERROR: Invalid Attribute Form Code: {}", attr.FormCode);
+            Err(io::Error::from(io::ErrorKind::InvalidData))
+        };
 
         #[cfg(debug_assertions)]
         let name = read_utf16!(device, offset + attr.NameOffset as u64, attr.NameLength, max_size - attr.NameOffset as u64)?;
         debug!("Attribute Name: {}", name);
 
-        Ok(attr.RecordLength as u64)
+        result
     }
 }

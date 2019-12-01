@@ -258,7 +258,7 @@ macro_rules! read_utf16 {
                 let mut raw = raw.into_boxed_slice();
                 {
                     let s: &mut [u8] = unsafe {
-                        let ptr = &mut raw as *mut _ as *mut u8;
+                        let ptr = raw.as_mut_ptr() as *mut _ as *mut u8;
                         std::slice::from_raw_parts_mut(ptr, length * 2)
                     };
                     $device.seek(std::io::SeekFrom::Start(offset))?;
