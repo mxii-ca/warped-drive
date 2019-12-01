@@ -1,3 +1,4 @@
+use core::cmp;
 use std::io;
 use std::io::{Read, Seek};
 
@@ -111,43 +112,14 @@ struct ATTRIBUTE_RECORD_HEADER {
     // ...
 }
 
-
-fn parse_file_attribute<R>(device: &mut Device<R>, offset: u64, max_size: u64) -> io::Result<u64>
-where R: Read + Seek {
-    let type_code = read_struct!(ATTRIBUTE_TYPE_CODE, device, offset, max_size)?;
-    if type_code == ATTRIBUTE_TYPE_CODE::END {
-        return Ok(0);
-    }
-
-    let attr = read_struct!(ATTRIBUTE_RECORD_HEADER, device, offset, max_size)?;
-
-    let name = read_utf16!(device, offset + attr.NameOffset as u64, attr.NameLength, max_size - attr.NameOffset as u64)?;
-    debug!("Attribute Name: {}", name);
-
-    Ok(attr.RecordLength as u64)
 }
 
-fn parse_file_record<R>(device: &mut Device<R>, offset: u64, max_size: u64) -> io::Result<()>
-where R: Read + Seek {
-    let record = read_struct!(FILE_RECORD_SEGMENT_HEADER, device, offset, max_size)?;
-
-    let (max, mut pos) = (record.RealSize as u64, record.FirstAttributeOffset as u64);
-    while pos < max {
-        let size = parse_file_attribute(device, offset + pos, max - pos)?;
-        if size == 0 {
-            break;
-        }
-        pos += size;
-    }
-
-    Ok(())
 }
 
 
 pub struct Ntfs<R> {
     inner: Device<R>,
-    mft_primary: u64,
-    mft_backup: u64,
+    mft: FileRecord,
     record_size: u64,
 }
 
@@ -196,21 +168,71 @@ where R: Read + Seek {
             cluster_size, mft_offset, backup_offset, mft_record_size, index_buffer_size
         );
 
-        let wrapper = Device::with_block_size(inner, cluster_size as usize);
-        let mut new = Self {
+        let mut wrapper = Device::with_block_size(inner, cluster_size as usize);
+
+        let mft_record = {
+            FileRecord::new(&mut wrapper, mft_offset, mft_record_size).or_else(|_| {
+                eprintln!("WARNING: Primart MFT is bad. Parsing backup...");
+                FileRecord::new(&mut wrapper, backup_offset, mft_record_size)
+            })
+        }?;
+
+        Ok(Self {
             inner: wrapper,
-            mft_primary: mft_offset,
-            mft_backup: backup_offset,
-            record_size: mft_record_size
-        };
-        new.refresh()?;
-        Ok(new)
+            record_size: mft_record_size,
+            mft: mft_record,
+        })
     }
 
     fn refresh(&mut self) -> io::Result<()> {
-        parse_file_record(&mut self.inner, self.mft_primary, self.record_size).or_else(|_| {
-            eprintln!("WARNING: Primart MFT is bad. Parsing backup...");
-            parse_file_record(&mut self.inner, self.mft_backup, self.record_size)
-        })
+        self.mft.refresh(&mut self.inner, self.record_size)
+    }
+}
+
+
+struct FileRecord {
+    offset: u64,
+}
+
+impl FileRecord {
+
+    pub fn new<R>(device: &mut Device<R>, offset: u64, size: u64) -> io::Result<Self>
+    where R: Read + Seek {
+        let mut new = Self{ offset: offset };
+        new.refresh(device, size)?;
+        Ok(new)
+    }
+
+    pub fn refresh<R>(&mut self, device: &mut Device<R>, size: u64) -> io::Result<()>
+    where R: Read + Seek {
+        let record = read_struct!(FILE_RECORD_SEGMENT_HEADER, device, self.offset, size)?;
+
+        let max = cmp::min(size, record.RealSize as u64);
+        let mut pos = record.FirstAttributeOffset as u64;
+        while pos < max {
+            let size = self.parse_attribute(device, self.offset + pos, max - pos)?;
+            if size == 0 {
+                break;
+            }
+            pos += size;
+        }
+
+        Ok(())
+    }
+
+    fn parse_attribute<R>(&mut self, device: &mut Device<R>, offset: u64, max_size: u64) -> io::Result<u64>
+    where R: Read + Seek {
+        let type_code = read_struct!(ATTRIBUTE_TYPE_CODE, device, offset, max_size)?;
+        if type_code == ATTRIBUTE_TYPE_CODE::END {
+            return Ok(0);
+        }
+
+        let attr = read_struct!(ATTRIBUTE_RECORD_HEADER, device, offset, max_size)?;
+
+        #[cfg(debug_assertions)]
+        let name = read_utf16!(device, offset + attr.NameOffset as u64, attr.NameLength, max_size - attr.NameOffset as u64)?;
+        debug!("Attribute Name: {}", name);
+
+        Ok(attr.RecordLength as u64)
     }
 }
