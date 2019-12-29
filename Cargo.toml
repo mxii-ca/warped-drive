@@ -1,5 +1,5 @@
 [package]
-name = "tardis"
+name = "warped-drive"
 version = "0.1.0"
 description = "filesystem reader"
 categories = ["filesystem"]

@@ -1,8 +1,8 @@
 use std::env;
 use std::process;
 
-use tardis::device::Device;
-use tardis::fs::parse;
+use warped_drive::device::Device;
+use warped_drive::fs::parse;
 
 
 fn print_usage(program: &str, err: bool) {
