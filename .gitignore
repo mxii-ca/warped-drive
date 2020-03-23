@@ -365,3 +365,8 @@ MigrationBackup/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+
+
+## Ignore Rust temporary files and build results
+target/
+**/*.rs.bk

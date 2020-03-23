@@ -1,0 +1,21 @@
+[package]
+name = "warped-drive"
+version = "0.1.0"
+description = "filesystem reader"
+categories = ["filesystem"]
+keywords = ["filesystem", "fs"]
+authors = ["Malcolm Robert <github@mxii.ca>"]
+license = "MIT"
+edition = "2018"
+
+[badges]
+maintenance = { status = "experimental" }
+
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["errhandlingapi", "ioapiset", "winerror", "winioctl"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.9" }
