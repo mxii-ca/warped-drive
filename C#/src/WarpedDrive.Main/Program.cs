@@ -54,7 +54,7 @@ namespace WarpedDrive.Main
             Console.Out.WriteLine($"Opening: {path}");
             try
             {
-                using (FileStream file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (Device device = Device.Open(path, 4096))
                 {
                     // FIXME: XXX: ...
                 }
