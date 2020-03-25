@@ -54,8 +54,10 @@ namespace WarpedDrive.Main
             Console.Out.WriteLine($"Opening: {path}");
             try
             {
-                using (Device device = Device.Open(path, 4096))
+                using (Device device = Device.Open(path))
                 {
+                    Console.Out.WriteLine($"Block Size: {device.GetBlockSize()}");
+
                     // FIXME: XXX: ...
                 }
             }

@@ -3,7 +3,7 @@ using System.IO;
 
 namespace WarpedDrive
 {
-    public class Device : Stream
+    public class Device : Stream, IBlock
     {
         protected Stream inner;
         protected byte[] buffer;
@@ -32,8 +32,21 @@ namespace WarpedDrive
         }
 
         public static Device Wrap(Stream inner, uint blockSize) => new Device(inner, blockSize);
-        public static Device Open(string path, uint blockSize) =>
-            Wrap(File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), blockSize);
+        public static Device Wrap<T>(T inner) where T : Stream, IBlock => Wrap(inner, inner.GetBlockSize());
+        public static Device Wrap(FileStream file)
+        {
+            try
+            {
+                return Wrap(file, file.GetBlockSize());
+            }
+            catch (Exception)
+            {
+                file.Close();
+                throw;
+            }
+        }
+        public static Device Open(string path) =>
+            Wrap(File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
 
         public uint GetBlockSize() => (uint)buffer.Length;
 
