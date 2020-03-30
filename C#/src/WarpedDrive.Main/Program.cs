@@ -58,6 +58,10 @@ namespace WarpedDrive.Main
                 {
                     Console.Out.WriteLine($"Block Size: {device.GetBlockSize()}");
 
+                    byte[] header = new byte[512];
+                    device.Read(header, 0, header.Length);
+                    header.PrintXxd();
+
                     // FIXME: XXX: ...
                 }
             }
