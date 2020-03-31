@@ -19,7 +19,6 @@ namespace WarpedDrive
         {
             byte[] header = new byte[512];
             stream.Read(header, 0, header.Length);
-            header.PrintXxd();
 
             var query = typeof(Volume).Assembly.GetTypes()
                 .Where(t => !t.IsAbstract && t.IsSubclassOf(typeof(Volume)));

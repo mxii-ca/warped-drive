@@ -56,8 +56,6 @@ namespace WarpedDrive.Main
             {
                 using (Device device = Device.Open(path))
                 {
-                    Console.Out.WriteLine($"Block Size: {device.GetBlockSize()}");
-
                     Volume volume = Volume.Parse(device);
 
                     // FIXME: XXX: ...
