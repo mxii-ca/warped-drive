@@ -140,6 +140,7 @@ where R: Read + Seek {
             SeekFrom::Start(n) => { Ok(n) }
             SeekFrom::End(n) => {
                 let end = self.inner.seek(SeekFrom::End(0))?;
+                self.inner.seek(SeekFrom::Start(maximum))?;
                 iadd(end, n)
             }
         }?;
@@ -153,7 +154,9 @@ where R: Read + Seek {
             let aligned = target - offset;
 
             self.discard_buffer();
-            self.inner.seek(SeekFrom::Start(aligned))?;
+            if aligned != maximum {
+                self.inner.seek(SeekFrom::Start(aligned))?;
+            }
 
             if target > aligned {
                 self.fill_buf()?;
