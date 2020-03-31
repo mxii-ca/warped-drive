@@ -7,10 +7,12 @@ namespace WarpedDrive
 {
     public class Volume
     {
+        protected long offset;
         protected Stream inner;
 
-        protected Volume(Stream stream, byte[] header){
+        protected Volume(Stream stream){
             inner = stream;
+            offset = stream.Position;
         }
 
         public static bool IsHeaderValid(byte[] header) => false;
@@ -19,6 +21,7 @@ namespace WarpedDrive
         {
             byte[] header = new byte[512];
             stream.Read(header, 0, header.Length);
+            stream.Seek(-512, SeekOrigin.Current);
 
             var query = typeof(Volume).Assembly.GetTypes()
                 .Where(t => !t.IsAbstract && t.IsSubclassOf(typeof(Volume)));
@@ -31,7 +34,7 @@ namespace WarpedDrive
                         subclass,
                         BindingFlags.NonPublic | BindingFlags.CreateInstance | BindingFlags.Instance,
                         null,
-                        new object[] { stream, header },
+                        new object[] { stream },
                         null);
                 }
             }

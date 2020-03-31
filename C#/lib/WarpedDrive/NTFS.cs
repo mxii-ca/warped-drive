@@ -4,13 +4,55 @@ using System.Text;
 
 namespace WarpedDrive
 {
+    public class NTFSFile
+    {
+        protected long offset;
+
+        protected NTFSFile(Stream stream)
+        {
+            offset = stream.Position;
+
+            // MULTI_SECTOR_HEADER
+            byte[] signature = new byte[4];
+            stream.Read(signature, 0, 4);
+            if (!IsHeaderValid(signature)) throw new NotSupportedException("not an NTFS file");
+            // ushort UpdateSequenceArrayOffset, ushort UpdateSequenceArraySize
+            stream.Seek(2 + 2, SeekOrigin.Current);
+
+            // FILE_RECORD_SEGMENT_HEADER
+            // ulong LogSequenceNumber, ushort SequenceNumber, ushort ReferenceCount
+            stream.Seek(8 + 2 + 2, SeekOrigin.Current);
+            ushort firstAttributeOffset = 0;
+            ushort flags = 0;
+            uint realSize = 0;
+            using(BinaryReader reader = new BinaryReader(stream, Encoding.Unicode, true))
+            {
+                firstAttributeOffset = reader.ReadUInt16();
+                flags = reader.ReadUInt16();
+                realSize = reader.ReadUInt32();
+            }
+
+            Console.WriteLine($"FirstAttributeOffset: {firstAttributeOffset}");
+            Console.WriteLine($"Flags: {flags}");
+            Console.WriteLine($"RealSize: {realSize}");
+        }
+
+        public static bool IsHeaderValid(byte[] header) =>
+            (header.Length > 3 && header[0] == 0x46 && header[1] == 0x49 && header[2] == 0x4C && header[3] == 0x45);
+
+        public static NTFSFile Parse(Stream stream) => new NTFSFile(stream);
+    }
+
     public class NTFS : Volume
     {
-        protected NTFS(Stream stream, byte[] header) : base(stream, header)
+        protected NTFSFile mft;
+
+        protected NTFS(Stream stream) : base(stream)
         {
             // byte[3] Jump, byte[8] OemId ('NTFS    ')
+            byte[] header = new byte[11];
+            stream.Read(header, 0, header.Length);
             if (!IsHeaderValid(header)) throw new NotSupportedException("not an NTFS volume");
-            stream.Seek(11, SeekOrigin.Begin);
 
             // BIOS_PARAMETER_BLOCK
             ushort bytesPerSector = 0;
@@ -26,55 +68,46 @@ namespace WarpedDrive
             stream.Seek(2 + 1 + 2 + 2 + 1 + 2 + 2 + 2 + 4 + 4, SeekOrigin.Current);
 
             // NTFS_EXTENDED_BIOS_PARAMETER_BLOCK
+            // uint SectorsPerFAT32, ulong TotalSectors64
+            stream.Seek(4 + 8, SeekOrigin.Current);
             ulong mftLocation = 0;
             ulong backupMftLocation = 0;
             sbyte clustersPerMftRecord = 0;
-            sbyte clustersPerIndexBuffer = 0;
-            // uint SectorsPerFAT32, ulong TotalSectors64
-            stream.Seek(4 + 8, SeekOrigin.Current);
             using (BinaryReader reader = new BinaryReader(stream, Encoding.Unicode, true))
             {
                 mftLocation = reader.ReadUInt64();
                 backupMftLocation = reader.ReadUInt64();
                 clustersPerMftRecord = reader.ReadSByte();
-                reader.ReadBytes(3); // unused
-                clustersPerIndexBuffer = reader.ReadSByte();
             }
 
-            int clusterSize = bytesPerSector * sectorsPerCluster;
+            // calculate actual offsets and size
+            uint clusterSize = (uint)bytesPerSector * (uint)sectorsPerCluster;
             ulong mftOffset = mftLocation * (ulong)clusterSize;
             ulong backupOffset = backupMftLocation * (ulong)clusterSize;
-
-            int recordSize = 0;
+            uint recordSize = 0;
             if (clustersPerMftRecord > 0)
-                recordSize = clustersPerMftRecord * clusterSize;
+                recordSize = (uint)clustersPerMftRecord * clusterSize;
             else
-                recordSize = (int)Math.Pow(2, -clustersPerMftRecord);
+                recordSize = (uint)Math.Pow(2, -clustersPerMftRecord);
 
-            int indexSize = 0;
-            if (clustersPerIndexBuffer > 0)
-                indexSize = clustersPerIndexBuffer * clusterSize;
-            else
-                indexSize = (int)Math.Pow(2, -clustersPerIndexBuffer);
-
-            System.Console.WriteLine($"Cluster Size: {clusterSize}");
-            System.Console.WriteLine($"Primary MFT - Offset: {mftOffset}");
-            System.Console.WriteLine($"Backup  MFT - Offset: {backupOffset}");
-            System.Console.WriteLine($"MFT Record Size: {recordSize}");
-            System.Console.WriteLine($"Index Buffer Size: {indexSize}");
-
-
-            // FIXME: XXX: ...
+            // parse the MFT file
+            inner = Device.Wrap(stream, clusterSize);
+            try
+            {
+                inner.Seek(offset + (long)mftOffset, SeekOrigin.Begin);
+                mft = NTFSFile.Parse(inner);
+            }
+            catch (NotSupportedException)
+            {
+                Console.Error.WriteLine("WARNING: Primary MFT is bad. Parsing backup...");
+                inner.Seek(offset + (long)backupOffset, SeekOrigin.Begin);
+                mft = NTFSFile.Parse(inner);
+            }
         }
 
         public static new bool IsHeaderValid(byte[] header) =>
-            (header.Length > 8 && header[3] == 0x4e && header[4] == 0x54 && header[5] == 0x46 && header[6] == 0x53);
+            (header.Length > 7 && header[3] == 0x4e && header[4] == 0x54 && header[5] == 0x46 && header[6] == 0x53);
 
-        public static new NTFS Parse(Stream stream)
-        {
-            byte[] header = new byte[512];
-            stream.Read(header, 0, header.Length);
-            return new NTFS(stream, header);
-        }
+        public static new NTFS Parse(Stream stream) => new NTFS(stream);
     }
 }
