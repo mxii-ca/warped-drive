@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace WarpedDrive.NTFS
@@ -21,38 +22,113 @@ namespace WarpedDrive.NTFS
         END = 0xFFFFFFFF,
     }
 
-    public class Attribute
+    public class Attribute : Stream, IBlock
     {
+        protected Stream inner;
         protected long offset;
-        internal uint recordLength;
-        internal ATTRIBUTE_TYPE_CODE type;
+        protected uint clusterSize;
 
-        protected Attribute(Stream stream)
+        public ATTRIBUTE_TYPE_CODE Type { get; protected set; }
+        public string Name { get; protected set; }
+        internal uint recordLength;
+        protected ushort flags;
+        protected long dataSize;
+        protected (long?, long)[] dataRuns;
+        protected long currentPosition;
+        protected int currentRun;
+        protected int currentOffset;
+
+        public override long Position { get => Seek(0, SeekOrigin.Current); set => Seek(value, SeekOrigin.Begin); }
+        public override long Length => dataSize;
+        public override bool CanWrite => false;
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanTimeout => inner.CanTimeout;
+        public override int ReadTimeout { get => inner.ReadTimeout; set => inner.ReadTimeout = value; }
+
+        protected Attribute(Stream stream, uint clusterSize)
         {
+            dataRuns = new (long?, long)[0];
+            Name = "";
+
+            inner = stream;
             offset = stream.Position;
+            this.clusterSize = clusterSize;
 
             // ATTRIBUTE_RECORD_HEADER
-            type = ATTRIBUTE_TYPE_CODE.END;
             byte formCode = 0;
             byte nameLength = 0;
             ushort nameOffset = 0;
-            ushort flags = 0;
             using (BinaryReader reader = new BinaryReader(stream, Encoding.Unicode, true))
             {
-                type = (ATTRIBUTE_TYPE_CODE)reader.ReadUInt32();
+                Type = (ATTRIBUTE_TYPE_CODE)reader.ReadUInt32();
+                if (Type == ATTRIBUTE_TYPE_CODE.END) return;
                 recordLength = reader.ReadUInt32();
-
-                Console.WriteLine($"Attribute Type: {type}");
-                Console.WriteLine($"Attribute Length: {recordLength}");
-                if (type == ATTRIBUTE_TYPE_CODE.END) return;
-
                 formCode = reader.ReadByte();
                 nameLength = reader.ReadByte();
                 nameOffset = reader.ReadUInt16();
                 flags = reader.ReadUInt16();
+            }
+            stream.Seek(2, SeekOrigin.Current); // ushort Instance
 
-                Console.WriteLine($"Attribute Form: {formCode}");
-                Console.WriteLine($"Attribute Flags: {flags}");
+            // resident header
+            if (formCode == 0)
+            {
+                using (BinaryReader reader = new BinaryReader(stream, Encoding.Unicode, true))
+                {
+                    dataSize = (long)reader.ReadUInt32();           // ValueLength
+                    long dataOffset = offset + reader.ReadUInt16(); // ValueOffset
+                    dataRuns = new (long?, long)[1] { (dataOffset, (long)dataSize) };
+                }
+            }
+
+            // non-resident header
+            else
+            {
+                // ulong LowestVcn, ulong HighestVcn
+                stream.Seek(8 + 8, SeekOrigin.Current);
+                ushort mappingPairOffset = 0;
+                using (BinaryReader reader = new BinaryReader(stream, Encoding.Unicode, true))
+                    mappingPairOffset = reader.ReadUInt16();
+                // ushort CompressionUnitSize, uint Padding, ulong AllocatedSize
+                stream.Seek(2 + 4 + 8, SeekOrigin.Current);
+                using (BinaryReader reader = new BinaryReader(stream, Encoding.Unicode, true))
+                    dataSize = (long)reader.ReadUInt64();
+
+                // parse the data runs
+                // data runs are sized by cluster, not bytes
+                List<(long?, long)> runs = new List<(long?, long)>();
+                stream.Seek(offset + mappingPairOffset, SeekOrigin.Begin);
+                long previousOffset = 0;
+                while (stream.Position < offset + recordLength)
+                {
+                    int header = stream.ReadByte();
+                    if (header == 0) break;
+
+                    byte[] buffer = new byte[8];
+                    int sizeLen = header & 0x0F;
+                    stream.Read(buffer, 0, sizeLen);
+                    long size = BitConverter.ToInt64(buffer, 0) * clusterSize;
+
+                    // offset length of 0 for a sparse block
+                    // offset is the offset from the previous non-sparse run offset
+                    int offsetLen = header >> 4;
+                    long? offset = null;
+                    if (offsetLen > 0)
+                    {
+                        buffer.Initialize();
+                        stream.Read(buffer, 0, offsetLen);
+                        // extend the highest bit to support negative offsets
+                        if ((buffer[offsetLen - 1] & 0x80) != 0)
+                            foreach (int i in Enumerable.Range(offsetLen, 8 - offsetLen))
+                                buffer[i] = 0xFF;
+                        offset = BitConverter.ToInt64(buffer, 0) * clusterSize + previousOffset;
+                        previousOffset = offset.Value;
+                    }
+
+                    runs.Add((offset, size));
+                }
+                dataRuns = runs.ToArray();
             }
 
             if (nameLength > 0)
@@ -60,13 +136,107 @@ namespace WarpedDrive.NTFS
                 stream.Seek(offset + nameOffset, SeekOrigin.Begin);
                 using (BinaryReader reader = new BinaryReader(stream, Encoding.Unicode, true))
                 {
-                    string name = new string(reader.ReadChars(nameLength));
-                    Console.WriteLine($"Attribute Name: {name}");
+                    Name = new string(reader.ReadChars(nameLength));
                 }
             }
         }
 
-        public static Attribute Parse(Stream stream) => new Attribute(stream);
+        public static Attribute Parse(Stream stream, uint clusterSize) => new Attribute(stream, clusterSize);
+
+        public static Attribute Parse<T>(T stream) where T : Stream, IBlock => Parse(stream, stream.GetBlockSize());
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (count <= 0) return 0;
+
+            (long? runOffset, long runSize) = dataRuns[currentRun];
+            int read = Math.Min(count, (int)(runSize - currentOffset));
+            if (read == 0) throw new EndOfStreamException();
+
+            // sparse file
+            if (runOffset == null)
+            {
+                Array.Clear(buffer, offset, read);
+            }
+
+            // regular data
+            // TODO: support compression / encryption
+            else
+            {
+                inner.Seek(runOffset.Value + currentOffset, SeekOrigin.Begin);
+                read = inner.Read(buffer, offset, read);
+            }
+
+            // update position trackers
+            currentOffset += read;
+            currentPosition += read;
+            if (currentOffset >= runSize && currentRun < dataRuns.Length - 1)
+            {
+                currentOffset = 0;
+                currentRun += 1;
+            }
+            return read;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            if (!inner.CanSeek) throw new NotSupportedException("seeking is not supported");
+
+            long target = -1;
+            switch (origin)
+            {
+                case SeekOrigin.Current:
+                    target = currentPosition + offset;
+                    break;
+                case SeekOrigin.Begin:
+                    target = offset;
+                    break;
+                case SeekOrigin.End:
+                    target = dataSize + offset;
+                    break;
+            }
+            if (target < 0 || target > dataSize)
+                throw new ArgumentOutOfRangeException("cannot seek beyond the bounds of the stream");
+
+            while (target != currentPosition)
+            {
+                (long? runOffset, long runSize) = dataRuns[currentRun];
+                long minimum = currentPosition - currentOffset;
+                long maximum = minimum + runSize;
+
+                if (target >= maximum && currentRun < dataRuns.Length - 1)
+                {
+                    currentRun += 1;
+                    currentOffset = 0;
+                    currentPosition = maximum;
+                }
+                else if (target < minimum)
+                {
+                    currentRun -= 1;
+                    currentOffset = 0;
+                    currentPosition = minimum;
+                }
+                else if (target <= maximum)
+                {
+                    currentOffset = (int)(Math.Min(target, maximum) - minimum);
+                    currentPosition = minimum + currentOffset;
+                }
+                else
+                {
+                    throw new EndOfStreamException("unexpected end of the stream");
+                }
+            }
+            return target;
+        }
+
+        public override void Flush() => inner.Flush();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException("truncation is not supported");
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException("writing is not supported");
+
+        public uint GetBlockSize() => clusterSize;
     }
 
     public class File
@@ -74,7 +244,7 @@ namespace WarpedDrive.NTFS
         protected long offset;
         protected List<Attribute> attributes;
 
-        protected File(Stream stream)
+        protected File(Stream stream, uint clusterSize)
         {
             offset = stream.Position;
 
@@ -104,8 +274,8 @@ namespace WarpedDrive.NTFS
             while (attributeOffset < offset + realSize)
             {
                 stream.Seek(attributeOffset, SeekOrigin.Begin);
-                Attribute attr = Attribute.Parse(stream);
-                if (attr.type == ATTRIBUTE_TYPE_CODE.END) break;
+                Attribute attr = Attribute.Parse(stream, clusterSize);
+                if (attr.Type == ATTRIBUTE_TYPE_CODE.END) break;
                 attributeOffset += attr.recordLength;
                 attributes.Add(attr);
             }
@@ -114,7 +284,8 @@ namespace WarpedDrive.NTFS
         public static bool IsHeaderValid(byte[] header) =>
             (header.Length > 3 && header[0] == 0x46 && header[1] == 0x49 && header[2] == 0x4C && header[3] == 0x45);
 
-        public static File Parse(Stream stream) => new File(stream);
+        public static File Parse(Stream stream, uint clusterSize) => new File(stream, clusterSize);
+        public static File Parse<T>(T stream) where T : Stream, IBlock => Parse(stream, stream.GetBlockSize());
     }
 
     public class NTFS : Volume
@@ -169,13 +340,13 @@ namespace WarpedDrive.NTFS
             try
             {
                 inner.Seek(offset + (long)mftOffset, SeekOrigin.Begin);
-                mft = File.Parse(inner);
+                mft = File.Parse(inner, clusterSize);
             }
             catch (NotSupportedException)
             {
                 Console.Error.WriteLine("WARNING: Primary MFT is bad. Parsing backup...");
                 inner.Seek(offset + (long)backupOffset, SeekOrigin.Begin);
-                mft = File.Parse(inner);
+                mft = File.Parse(inner, clusterSize);
             }
         }
 
