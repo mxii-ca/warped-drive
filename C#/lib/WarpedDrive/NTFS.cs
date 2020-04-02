@@ -286,6 +286,46 @@ namespace WarpedDrive.NTFS
 
         public static File Parse(Stream stream, uint clusterSize) => new File(stream, clusterSize);
         public static File Parse<T>(T stream) where T : Stream, IBlock => Parse(stream, stream.GetBlockSize());
+
+        private enum FILE_NAME_TYPE : byte
+        {
+            POSIX = 0,
+            WINDOWS = 1,
+            DOS = 2,
+            DOS_WINDOWS = 3,
+        }
+
+        public string? Name {
+            get
+            {
+                string? dosName = null;
+                string? posixName = null;
+                foreach (Attribute attr in attributes)
+                {
+                    if (attr.Type != ATTRIBUTE_TYPE_CODE.FILE_NAME) continue;
+
+                    // FILE_NAME
+                    // ulong ParentDirectory, ulong CreationTime, ulong ModifiedTime, ulong ChangeTime,
+                    // ulong AccessTime, ulong AllocatedSize, ulong RealSize, uint Permissions, uint ReparseTag
+                    attr.Seek(8 * 8, SeekOrigin.Begin);
+                    int fileNameLength = attr.ReadByte();
+                    int type = attr.ReadByte();
+
+                    using (BinaryReader reader = new BinaryReader(attr, Encoding.Unicode, true))
+                    {
+                        string name = new string(reader.ReadChars(fileNameLength));
+                        if (type == (int)FILE_NAME_TYPE.WINDOWS || type == (int)FILE_NAME_TYPE.DOS_WINDOWS)
+                            return name;
+                        else if (type == (int)FILE_NAME_TYPE.DOS)
+                            dosName = name;
+                        else if (type == (int)FILE_NAME_TYPE.POSIX)
+                            posixName = name;
+                    }
+                }
+                if (posixName != null) return posixName;
+                return dosName;
+            }
+        }
     }
 
     public class NTFS : Volume
@@ -348,6 +388,7 @@ namespace WarpedDrive.NTFS
                 inner.Seek(offset + (long)backupOffset, SeekOrigin.Begin);
                 mft = File.Parse(inner, clusterSize);
             }
+            Console.WriteLine($"MFT File Name: {mft.Name}");
         }
 
         public static new bool IsHeaderValid(byte[] header) =>
