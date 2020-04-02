@@ -20,7 +20,7 @@ namespace WarpedDrive
         public static Volume Parse(Stream stream)
         {
             byte[] header = new byte[512];
-            stream.Read(header, 0, header.Length);
+            stream.ReadExact(header, 0, header.Length);
             stream.Seek(-512, SeekOrigin.Current);
 
             var query = typeof(Volume).Assembly.GetTypes()

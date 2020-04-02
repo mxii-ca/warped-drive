@@ -107,7 +107,7 @@ namespace WarpedDrive.NTFS
 
                     byte[] buffer = new byte[8];
                     int sizeLen = header & 0x0F;
-                    stream.Read(buffer, 0, sizeLen);
+                    stream.ReadExact(buffer, 0, sizeLen);
                     long size = BitConverter.ToInt64(buffer, 0) * clusterSize;
 
                     // offset length of 0 for a sparse block
@@ -117,7 +117,7 @@ namespace WarpedDrive.NTFS
                     if (offsetLen > 0)
                     {
                         buffer.Initialize();
-                        stream.Read(buffer, 0, offsetLen);
+                        stream.ReadExact(buffer, 0, offsetLen);
                         // extend the highest bit to support negative offsets
                         if ((buffer[offsetLen - 1] & 0x80) != 0)
                             foreach (int i in Enumerable.Range(offsetLen, 8 - offsetLen))
@@ -250,7 +250,7 @@ namespace WarpedDrive.NTFS
 
             // MULTI_SECTOR_HEADER
             byte[] signature = new byte[4];
-            stream.Read(signature, 0, 4);
+            stream.ReadExact(signature, 0, 4);
             if (!IsHeaderValid(signature)) throw new NotSupportedException("not an NTFS file");
             // ushort UpdateSequenceArrayOffset, ushort UpdateSequenceArraySize
             stream.Seek(2 + 2, SeekOrigin.Current);
@@ -336,7 +336,7 @@ namespace WarpedDrive.NTFS
         {
             // byte[3] Jump, byte[8] OemId ('NTFS    ')
             byte[] header = new byte[11];
-            stream.Read(header, 0, header.Length);
+            stream.ReadExact(header, 0, header.Length);
             if (!IsHeaderValid(header)) throw new NotSupportedException("not an NTFS volume");
 
             // BIOS_PARAMETER_BLOCK
