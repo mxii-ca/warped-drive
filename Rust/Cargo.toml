@@ -18,4 +18,4 @@ maintenance = { status = "experimental" }
 winapi = { version = "0.3", features = ["errhandlingapi", "ioapiset", "winerror", "winioctl"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.9" }
+nix = { version = "0.20" }
